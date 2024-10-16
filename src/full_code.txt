@@ -1,0 +1,649 @@
+import imgLogo from './assets/logo-rr.svg'
+import imgReadyPlayerMe from './assets/bottom-logo.svg'
+import { useState } from 'react'
+import { generateRandomGuestName, getHashValue, getStoreValue, setHashValue, setStoreValue } from './utils/helpers'
+
+function Lobby({ onJoinOrCreateRoom }) {
+  const [screen, setScreen] = useState(getHashValue('r') ? 'NAME' : 'LOBBY')
+  const [playerName, setPlayerName] = useState(getStoreValue('player_name') || generateRandomGuestName()) // NEW / JOIN
+
+  return (
+    <div className='flex flex-col items-center justify-center h-screen bg-gray-100'>
+      <div className='text-4xl font-bold'>
+        <img src={imgLogo} alt='Ready Rooms' style={{ height: '80px' }} />
+      </div>
+      <div className='text-md mt-1'>OPEN HANGOUT SPACES</div>
+      {screen === 'LOBBY' && (
+        <div className='flex mt-20'>
+          <button
+            className='rounded-lg px-3 py-2 m-3'
+            style={{ backgroundColor: '#A2DCBB' }}
+            onClick={() => {
+              setHashValue('r', '')
+              setScreen('NAME')
+            }}
+          >
+            New room
+          </button>
+          <button
+            className='rounded-lg px-3 py-2 m-3'
+            style={{ backgroundColor: '#ccc' }}
+            onClick={() => {
+              const roomCode = prompt('Enter room code')
+              if (roomCode) {
+                setHashValue('r', 'R' + roomCode)
+              }
+              setScreen('NAME')
+            }}
+          >
+            Join room
+          </button>
+        </div>
+      )}
+      {screen === 'NAME' && (
+        <div className='flex mt-20 items-center'>
+          <div className='rounded-3xl h-12 flex gap-4 overflow-hidden py-2 px-6 bg-white '>
+            <Input onChange={setPlayerName} onSubmit={() => {}} value={playerName} />
+          </div>
+          <button
+            className='rounded-lg px-3 py-2 m-3'
+            style={{ backgroundColor: '#A2DCBB' }}
+            onClick={() => {
+              setStoreValue('player_name', playerName)
+              onJoinOrCreateRoom()
+            }}
+          >
+            Next
+          </button>
+        </div>
+      )}
+      <div className='absolute bottom-5 text-xs gap-2 flex items-center'>
+        <img src={imgReadyPlayerMe} alt='Ready Player Me x Playroom' style={{ height: '40px' }} />
+      </div>
+    </div>
+  )
+}
+
+export default Lobby
+
+const Input = ({ onSubmit, onChange, value }) => (
+  <>
+    <input
+      maxLength={300}
+      placeholder='write your name'
+      className='flex-1 min-w-0 rounded-xl bg-transparent focus:outline-none focus:border-none input-box text5 font-bold'
+      type='text'
+      onChange={e => {
+        onChange(e.target.value)
+      }}
+      onKeyDown={e => {
+        e.stopPropagation() // avoids moving character while typing
+        e.code === 'Enter' && onSubmit()
+        e.code === 'Escape' && e.target.blur()
+      }}
+      value={value}
+    />
+  </>
+)
+
+
+import { createRoot } from 'react-dom/client'
+import App from './App'
+import './styles.css'
+
+const root = createRoot(document.getElementById('root'))
+root.render(<App />)
+
+
+import { Canvas } from '@react-three/fiber'
+import Lobby from './Lobby'
+import { AvatarCreator } from '@readyplayerme/react-avatar-creator'
+import { useState } from 'react'
+import { insertCoin, myPlayer } from 'playroomkit'
+import { generateRandomHexColor, getRandomExpression, getStoreValue } from './utils/helpers'
+import OpenMapExperience from './components/OpenMapExperience'
+import { UI } from './components/UI/UI'
+import { Loading } from './components/UI/Loading'
+
+export default function App() {
+  const [avatarMode, setAvatarMode] = useState(false)
+  const [gameLaunched, setGameLaunched] = useState(false)
+  const [experienceReady, setExperienceReady] = useState(false)
+
+  if (!avatarMode && !gameLaunched) {
+    // home page
+    return (
+      <Lobby
+        onJoinOrCreateRoom={roomCode => {
+          // setRoomCode(roomCode)
+          setAvatarMode(true)
+        }}
+      />
+    )
+  } else if (!gameLaunched && avatarMode) {
+    // show avatar creator
+    return (
+      <AvatarCreator
+        subdomain='playroom'
+        className='fixed top-0 left-0 z-10 w-screen h-screen'
+        onAvatarExported={event => {
+          const avatarUrl = event.data.url
+          const avatarImage = `https://models.readyplayer.me/${event.data.avatarId}.png?expression=${getRandomExpression()}&size=512`
+          // join or create the room now.
+          insertCoin({
+            skipLobby: true, // skip the lobby UI and join/create the room directly
+          }).then(() => {
+            myPlayer().setState('character', {
+              id: myPlayer().id,
+              hairColor: generateRandomHexColor(),
+              topColor: generateRandomHexColor(),
+              bottomColor: generateRandomHexColor(),
+              // set the avatar url and add a timestamp to it to avoid caching
+              avatarUrl: avatarUrl.split('?')[0] + '?' + new Date().getTime() + '&meshLod=2',
+              avatarImg: avatarImage,
+            })
+
+            myPlayer().setState('player_name', getStoreValue('player_name'))
+            setAvatarMode(false)
+            setGameLaunched(true)
+          })
+        }}
+      />
+    )
+  } else if (gameLaunched) {
+    // show the game
+    return (
+      <>
+        <Loading show={!experienceReady} />
+        <Canvas shadows camera={{ position: [8, 8, 8], fov: 30 }}>
+          <color attach='background' args={['#ececec']} />
+          <OpenMapExperience onReady={setExperienceReady} />
+        </Canvas>
+        {experienceReady && <UI />}
+      </>
+    )
+  }
+}
+
+
+/**
+ * This file is inspired on EcctrlAnimation with custom code to handle animations from different glb sources.
+ * Additionally, stores current animation into PLayroom player state
+ */
+
+import { useEffect, useRef } from 'react'
+import { animationSet, useRPMAnimations } from '../hooks/useRPMAnimations'
+import { useGame } from 'ecctrl'
+import * as THREE from 'three'
+
+export function AnimationLocalPlayer(props) {
+  const group = useRef()
+
+  const actions = useRPMAnimations(group)
+
+  return (
+    <group ref={group} dispose={null} userData={{ camExcludeCollision: true }}>
+      <Animator player={props.player} actions={actions} />
+      {/* Replace character model here */}
+      {props.children}
+    </group>
+  )
+}
+
+export const Animator = ({ player, actions }) => {
+  /**
+   * Character animations setup
+   */
+  const curAnimation = useGame(state => state.curAnimation)
+  const resetAnimation = useGame(state => state.reset)
+  const initializeAnimationSet = useGame(state => state.initializeAnimationSet)
+
+  useEffect(() => {
+    // Initialize animation set
+    initializeAnimationSet(animationSet)
+  }, [])
+
+  useEffect(() => {
+    player.setState('curAnimation', curAnimation)
+  }, [curAnimation])
+
+  useEffect(() => {
+    // Play animation
+    const action = actions[curAnimation ? curAnimation : animationSet.idle]
+
+    // For jump and jump land animation, only play once and clamp when finish
+    if (
+      curAnimation === animationSet.jump ||
+      curAnimation === animationSet.jumpLand ||
+      curAnimation === animationSet.action1 ||
+      curAnimation === animationSet.action2 ||
+      curAnimation === animationSet.action3 ||
+      curAnimation === animationSet.action4
+    ) {
+      action && action.reset().fadeIn(0.23).setLoop(THREE.LoopOnce, undefined).play()
+      action && (action.clampWhenFinished = true)
+    } else {
+      action && action.reset().fadeIn(0.23).play()
+    }
+
+    // When any action is clamp and finished reset animation
+    action && action._mixer.addEventListener('finished', () => resetAnimation())
+
+    return () => {
+      if (action) {
+        // Fade out previous action
+        action.fadeOut(0.3)
+
+        // Clean up mixer listener, and empty the _listeners array
+        action._mixer.removeEventListener('finished', () => resetAnimation())
+        action._mixer._listeners = []
+      }
+    }
+  }, [curAnimation, actions])
+
+  return <></>
+}
+
+
+/**
+ * Inspired in EcctrlAnimation, this module gets current animation from Playroom player state and uses the same logic
+ * of EcctrlAnimation to display character (other than local) animations.
+ */
+import { useEffect, useRef } from 'react'
+import * as THREE from 'three'
+import { usePlayerState } from 'playroomkit'
+import { animationSet, useRPMAnimations } from '../hooks/useRPMAnimations'
+
+export function AnimationRemotePlayer(props) {
+  // Change the character src to yours
+  const group = useRef()
+
+  const actions = useRPMAnimations(group)
+
+  return (
+    <group ref={group} dispose={null} userData={{ camExcludeCollision: true }}>
+      <Animator player={props.player} actions={actions} />
+      {props.children}
+    </group>
+  )
+}
+
+const Animator = ({ player, actions }) => {
+  /**
+   * Character animations setup
+   */
+  const [curAnimation] = usePlayerState(player, 'curAnimation')
+
+  useEffect(() => {
+    // Play animation
+    const action = actions[curAnimation ? curAnimation : animationSet.idle]
+
+    // For jump and jump land animation, only play once and clamp when finish
+    if (
+      curAnimation === animationSet.idle ||
+      curAnimation === animationSet.jump ||
+      curAnimation === animationSet.jumpLand ||
+      curAnimation === animationSet.action1 ||
+      curAnimation === animationSet.action2 ||
+      curAnimation === animationSet.action3 ||
+      curAnimation === animationSet.action4
+    ) {
+      action && action.reset().fadeIn(0.23).setLoop(THREE.LoopOnce, undefined).play()
+      action && (action.clampWhenFinished = true)
+    } else {
+      action && action.reset().fadeIn(0.23).play()
+    }
+
+    return () => {
+      if (action) {
+        // Fade out previous action
+        action.fadeOut(0.3)
+
+        action._mixer._listeners = []
+      }
+    }
+  }, [curAnimation, actions])
+
+  return <></>
+}
+
+
+/*
+Auto-generated by: https://github.com/pmndrs/gltfjsx
+*/
+
+import React, { useEffect, useMemo, useRef, useState } from 'react'
+import { Html, useGLTF } from '@react-three/drei'
+import { useFrame } from '@react-three/fiber'
+import { SkeletonUtils } from 'three-stdlib'
+import { Quaternion, Vector3 } from 'three'
+import { myPlayer, usePlayerState } from 'playroomkit'
+import soundIcon from '../assets/soundIcon.svg'
+
+export default function CharacterModel({
+  characterUrl = 'https://models.readyplayer.me/64f0265b1db75f90dcfd9e2c.glb',
+  sharePos = false,
+  player,
+}) {
+  const { scene } = useGLTF(characterUrl)
+  const [modelReady, setModelReady] = useState(false)
+
+  // Skinned meshes cannot be re-used in threejs without cloning them
+  const clone = useMemo(() => SkeletonUtils.clone(scene), [scene])
+
+  const group = useRef()
+  const worldPos = new Vector3()
+  const worldQua = new Quaternion()
+
+  // helpers
+  let newPos
+  let newRot
+  useFrame(() => {
+    // local characgter saves pos and rot in player's state
+    if (sharePos) {
+      group.current.getWorldPosition(worldPos)
+      player.setState('position', worldPos.toArray())
+      group.current.getWorldQuaternion(worldQua)
+      player.setState('rotation', worldQua.toArray())
+    } else {
+      // other characters read pos and rot from network
+      newPos = player.getState('position')
+      newPos && group.current.position.set(...newPos)
+      newRot = player.getState('rotation')
+      newRot && group.current.quaternion.set(...newRot)
+    }
+  })
+  useEffect(() => {
+    clone.traverse(child => {
+      if (child.isMesh) {
+        child.castShadow = true
+        child.receiveShadow = true
+      }
+    })
+    setModelReady(true)
+  }, [clone])
+
+  const [isInAvatarMode] = usePlayerState(myPlayer(), 'avatarMode')
+  const [thisModelInAvatarMode] = usePlayerState(player, 'avatarMode')
+
+  useEffect(() => {
+    if (thisModelInAvatarMode) {
+      setModelReady(false)
+    }
+  }, [thisModelInAvatarMode])
+
+  return (
+    <group position={[0, -0.9, 0]} ref={group} name={`character-${player.id}`} dispose={null}>
+      {modelReady && !isInAvatarMode && <PlayerName name={player.state.player_name} player={player} />}
+      <primitive object={clone} />
+    </group>
+  )
+}
+
+const PlayerName = ({ name, player }) => {
+  const [occluded, setOccluded] = useState(false)
+  const [withMic] = usePlayerState(player, 'withVoiceChat')
+  return (
+    <Html style={{ transform: 'translate(-50%, 0)' }} position={[0, 2.25, 0]} occlude onOcclude={setOccluded} distanceFactor={5}>
+      <div
+        className='select-none text-center flex justify-center'
+        style={{
+          fontFamily: "''",
+          opacity: occluded ? 0.5 : 1,
+          WebkitTextStroke: '0.01rem #fff',
+        }}
+      >
+        {name} <img src={soundIcon} className={`talking-icon ml-2 w-6 ${!withMic && 'hidden'}`} />
+      </div>
+    </Html>
+  )
+}
+
+export default function Lights() {
+  return (
+    <>
+      <directionalLight
+        intensity={5.7}
+        color={'#ffffff'}
+        castShadow
+        position={[-20, 20, 20]}
+        shadow-camera-top={20}
+        shadow-camera-right={20}
+        shadow-camera-bottom={-20}
+        shadow-camera-left={-20}
+        name="followLight"
+      />
+      <ambientLight intensity={0.7} />
+    </>
+  )
+}
+
+
+import { Physics, vec3 } from '@react-three/rapier'
+import { Environment, KeyboardControls } from '@react-three/drei'
+import { Fragment, useEffect, useState } from 'react'
+import Lights from './Lights'
+import Map from './Map'
+import CharacterModel from './CharacterModel'
+import { RoughPlane } from './RoughPlane'
+import { usePlayersState } from 'playroomkit'
+import { AnimationRemotePlayer } from './AnimationRemotePlayer'
+import { animationSet } from '../hooks/useRPMAnimations'
+import { PlayroomJoystick } from './PlayroomJoystick'
+import { Player } from './Player'
+
+/**
+ * Keyboard control preset
+ */
+const keyboardMap = [
+  { name: 'forward', keys: ['ArrowUp', 'KeyW'] },
+  { name: 'backward', keys: ['ArrowDown', 'KeyS'] },
+  { name: 'leftward', keys: ['ArrowLeft', 'KeyA'] },
+  { name: 'rightward', keys: ['ArrowRight', 'KeyD'] },
+  { name: 'jump', keys: ['Space'] },
+  { name: 'run', keys: ['Shift'] },
+  { name: 'action1', keys: ['1'] },
+  { name: 'action2', keys: ['2'] },
+  { name: 'action3', keys: ['3'] },
+  { name: 'action4', keys: ['KeyF'] },
+]
+
+export default function OpenMapExperience({ onReady }) {
+  const [mapReady, setMapReady] = useState(false)
+  const characters = usePlayersState('character')
+
+  useEffect(() => onReady(mapReady), [mapReady])
+
+  return (
+    <>
+      <Environment background files='/AmbienceExposure4k.hdr' />
+
+      <Lights />
+
+      <Physics timeStep='vary' debug={false} gravity={vec3({ x: 0, y: mapReady ? -9.8 : 0, z: 0 })}>
+        {characters
+          .filter(({ state }) => state) // remove nulls
+          .map(({ state, player }) =>
+            player.id === player.myId ? (
+              // controlled player
+              <KeyboardControls map={keyboardMap} key={`local-${state.id}`}>
+                <Player />
+                <PlayroomJoystick player={player} />
+              </KeyboardControls>
+            ) : (
+              // remote player
+              <Fragment key={`remote-${state.id}`}>
+                <AnimationRemotePlayer animationSet={animationSet} player={player}  key={state.avatarUrl}>
+                  <CharacterModel characterUrl={state.avatarUrl} player={player} />
+                </AnimationRemotePlayer>
+              </Fragment>
+            )
+          )}
+        <Map onMapReady={() => setMapReady(true)} />
+        <RoughPlane />
+      </Physics>
+    </>
+  )
+}
+
+import Ecctrl from 'ecctrl'
+import CharacterModel from './CharacterModel'
+import { myPlayer } from 'playroomkit'
+import { useState } from 'react'
+import { AnimationLocalPlayer } from './AnimationLocalPlayer'
+import { animationSet } from '../hooks/useRPMAnimations'
+import { randomRange } from '../utils/helpers'
+
+const getRandomPos = () => {
+  const min = -5
+  const max = 5
+  const x = randomRange(min, max)
+  const z = randomRange(min, max)
+  const y = 10
+  return [x, y, z]
+}
+export const Player = () => {
+  const [initialPos] = useState(getRandomPos())
+  const [player] = useState(myPlayer())
+  const characterUrl = player.state.character.avatarUrl
+
+  return (
+    <Ecctrl debug={false} animated camInitDis={-10} followLight position={initialPos}>
+      <AnimationLocalPlayer animationSet={animationSet} player={player} key={characterUrl}>
+        <CharacterModel characterUrl={characterUrl} sharePos player={player} />
+      </AnimationLocalPlayer>
+    </Ecctrl>
+  )
+}
+
+import { useJoystickControls } from 'ecctrl'
+import { Joystick } from 'playroomkit'
+import { useEffect, useRef } from 'react'
+import jumpButtonImage from '../assets/chevron-double-up.svg'
+import sprintButtonImage from '../assets/chevron-double-right.svg'
+import { useFrame } from '@react-three/fiber'
+
+export const PlayroomJoystick = ({ player }) => {
+  const setJoystick = useJoystickControls(state => state.setJoystick)
+  const resetJoystick = useJoystickControls(state => state.resetJoystick)
+  const pressButton1 = useJoystickControls(state => state.pressButton1)
+  const releaseAllButtons = useJoystickControls(state => state.releaseAllButtons)
+  const joystick = useRef()
+
+  useEffect(() => {
+    joystick.current = new Joystick(player, {
+      type: 'angular', // this is required by JoystickOptions
+      buttons: [
+        { id: 'jump', icon: jumpButtonImage },
+        { id: 'sprint', icon: sprintButtonImage },
+      ],
+    })
+    // append joystick & buttons div elements into #joystick element, this way
+    // we can control visibility via #joystick
+    const joystickContainer = window.document.querySelector('#joystick')
+    joystickContainer.style.display = 'inherits'
+    joystickContainer.appendChild(joystick.current.joystick.$element)
+
+    Object.keys(joystick.current.buttons).forEach(btnKey => {
+      const button = joystick.current.buttons[btnKey]
+      // stops propagation to avoid camera jumping
+      button.$element.addEventListener('touchmove', e => {
+        e.stopPropagation()
+      })
+      joystickContainer.appendChild(button.$element)
+    })
+  }, [player])
+
+  useFrame(() => {
+    if (!joystick.current) return
+
+    if (joystick.current.isPressed('jump')) {
+      pressButton1()
+    } else {
+      releaseAllButtons()
+    }
+    if (joystick.current.isJoystickPressed()) {
+      setJoystick(1, joystick.current.angle() - Math.PI / 2, joystick.current.isPressed('sprint'))
+    } else {
+      resetJoystick()
+    }
+  })
+
+  return <></>
+}
+
+
+import { RigidBody } from "@react-three/rapier";
+import { useGLTF } from "@react-three/drei";
+import { useEffect } from "react";
+import * as THREE from "three";
+
+export const RoughPlane = () => {
+  // Load models
+  const roughPlane = useGLTF("roughPlane.glb");
+
+  useEffect(() => {
+    // Receive Shadows
+    roughPlane.scene.traverse((child) => {
+      if (
+        child instanceof THREE.Mesh &&
+        child.material instanceof THREE.MeshStandardMaterial
+      ) {
+        child.receiveShadow = true;
+      }
+    });
+  }, []);
+
+  return (
+    <RigidBody type="fixed" colliders="trimesh" position={[0, -1.2, 0]}>
+      <primitive object={roughPlane.scene} />
+    </RigidBody>
+  );
+}
+
+useGLTF.preload("roughPlane.glb")
+
+
+import { CuboidCollider, RigidBody } from '@react-three/rapier'
+import { useEffect, useRef, useState } from 'react'
+
+export default function Map({ onMapReady }) {
+  const floorRef = useRef()
+
+  return (
+    <>
+      <RigidBody type='fixed' ref={floorRef}>
+        <mesh receiveShadow position={[0, -3.5, 0]}>
+          <cylinderGeometry args={[150, 150, 5, 50]} />
+          <shadowMaterial color='#333' transparent opacity={0.5} />
+          <meshStandardMaterial color='lightblue' transparent opacity={0.5} />
+        </mesh>
+      </RigidBody>
+      <GroundSensor callback={onMapReady} />
+    </>
+  )
+}
+
+const GroundSensor = ({ callback }) => {
+  const [initialized, setInitialized] = useState(false)
+
+  useEffect(() => {
+    initialized && callback()
+  }, [initialized])
+
+  return (
+    <>
+      <RigidBody gravityScale={0}>
+        <CuboidCollider
+          args={[5, 5, 1]}
+          sensor
+          onIntersectionEnter={() => {
+            setInitialized(true)
+          }}
+        />
+      </RigidBody>
+    </>
+  )
+}
+
+
