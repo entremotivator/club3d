@@ -1,22 +1,17 @@
 import AgoraRTC from 'agora-rtc-sdk-ng'
 import { RtcTokenBuilder, RtcRole } from 'agora-token'
 
+// Generate RTC Token using environment variables
 const generateRtcToken = (uid, channelName) => {
-  // Rtc Examples
-  const appId = 'YOUR_APP_ID'
-  const appCertificate = 'YOUR_APP_CERTIFICATE'
+  const appId = process.env.AGORA_APP_ID  // Retrieve App ID from Vercel env
+  const appCertificate = process.env.AGORA_APP_CERTIFICATE  // Retrieve App Certificate from Vercel env
   const role = RtcRole.PUBLISHER
-
   const expirationTimeInSeconds = 3600
-
   const currentTimestamp = Math.floor(Date.now() / 1000)
-
   const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds
 
   // Build token with uid
-  const tokenA = RtcTokenBuilder.buildTokenWithUid(appId, appCertificate, channelName, uid, role, privilegeExpiredTs)
-
-  return tokenA
+  return RtcTokenBuilder.buildTokenWithUid(appId, appCertificate, channelName, uid, role, privilegeExpiredTs)
 }
 
 const AgoraManager = async eventsCallback => {
@@ -24,7 +19,7 @@ const AgoraManager = async eventsCallback => {
 
   // Set up the signaling engine with the provided App ID, UID, and configuration
   const setupAgoraEngine = async () => {
-    agoraEngine = new AgoraRTC.createClient({ mode: 'rtc', codec: 'vp9' })
+    agoraEngine = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp9' })
   }
   await setupAgoraEngine()
 
@@ -37,7 +32,7 @@ const AgoraManager = async eventsCallback => {
 
   // Listen for the "user-unpublished" event.
   agoraEngine.on('user-unpublished', user => {
-    console.log(user.uid + 'has left the channel')
+    console.log(user.uid + ' has left the channel')
   })
 
   const getAgoraEngine = () => {
@@ -45,7 +40,7 @@ const AgoraManager = async eventsCallback => {
   }
 
   const config = {
-    appId: 'YOUR_APP_ID',
+    appId: process.env.AGORA_APP_ID,  // Retrieve App ID from Vercel env
     channelName: '',
     token: '',
   }
@@ -56,11 +51,12 @@ const AgoraManager = async eventsCallback => {
     config.token = token
 
     await agoraEngine.join(config.appId, config.channelName, config.token, uid)
+    
     // Create a local audio track from the audio sampled by a microphone.
     try {
       channelParameters.localAudioTrack = await AgoraRTC.createMicrophoneAudioTrack()
       await getAgoraEngine().publish([channelParameters.localAudioTrack])
-     
+
       return true
     } catch (e) {
       return e.code
