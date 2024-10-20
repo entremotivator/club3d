@@ -10,9 +10,9 @@ function Lobby({ onJoinOrCreateRoom }) {
   return (
     <div className='flex flex-col items-center justify-center h-screen bg-gray-100'>
       <div className='text-4xl font-bold'>
-        <img src={imgLogo} alt='Ready Rooms' style={{ height: '80px' }} />
+        <img src={imgLogo} alt='Entre Rooms' style={{ height: '80px' }} />
       </div>
-      <div className='text-md mt-1'>OPEN HANGOUT SPACES</div>
+      <div className='text-md mt-1'>OPEN AUDIO SPACES</div>
       {screen === 'LOBBY' && (
         <div className='flex mt-20'>
           <button
@@ -58,7 +58,7 @@ function Lobby({ onJoinOrCreateRoom }) {
         </div>
       )}
       <div className='absolute bottom-5 text-xs gap-2 flex items-center'>
-        <img src={imgReadyPlayerMe} alt='Ready Player Me x Playroom' style={{ height: '40px' }} />
+        <img src={imgReadyPlayerMe} alt='Avatars x Entrerooms' style={{ height: '40px' }} />
       </div>
     </div>
   )
